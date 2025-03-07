@@ -1,12 +1,18 @@
 ﻿using API.Models;
+using Azure;
+using Azure.AI.DocumentIntelligence;
+using System.Drawing;
+using System.Text.Json;
 
 namespace API.Services;
 
 public class FileService
 {
     private readonly string _rootFolderPath = @"./dms";
-    public FileService()
+    private readonly string _apiKey;
+    public FileService(string apiKey)
     {
+        _apiKey = apiKey;
 
     }
 
@@ -27,14 +33,14 @@ public class FileService
             };
             list.Add(root);
         }
-
+        string rootparent = GetParentFolder(_rootFolderPath);
         foreach (var directory in directoryPaths)
         {
             var item = new FileItem()
             {
                 IsDirectory = true,
                 Name = Path.GetFileName(directory),
-                Path = directory,
+                Path = Path.GetRelativePath(rootparent, directory),
                 SubItems = null
             };
             list.Add(item);
@@ -45,7 +51,7 @@ public class FileService
             {
                 IsDirectory = false,
                 Name = Path.ChangeExtension(Path.GetFileName(file), ".pdf"),
-                Path = Path.ChangeExtension(file, ".pdf"),
+                Path = Path.ChangeExtension(Path.GetRelativePath(rootparent, file), ".pdf"),
                 SubItems = null
             };
             list.Add(item);
@@ -67,7 +73,95 @@ public class FileService
         }
     }
     */
+    public async Task<Pdf> GetPdfOcr(string path, int targetHeight, int targetWidth)
+    {
+        Pdf pdf;
+        path = Path.GetFullPath(path);
+        string jsonPath = Path.ChangeExtension(path, ".json");
 
+        if (File.Exists(jsonPath))
+        {
+            string jsonContent = await File.ReadAllTextAsync(jsonPath);
+            pdf = JsonSerializer.Deserialize<Pdf>(jsonContent);
+            return pdf;
+        }
+
+        string AiPath = @"https://bakalarkaai.cognitiveservices.azure.com/";
+        List<OcrPage> pages = new();
+
+        using (FileStream fileStream = new FileStream(path, FileMode.Open))
+        {
+            var key = _apiKey; // Ensure this is populated from configuration
+            var client = new DocumentIntelligenceClient(new Uri(AiPath), new AzureKeyCredential(key));
+
+            Operation<AnalyzeResult> operation = await client.AnalyzeDocumentAsync(
+                WaitUntil.Completed,
+                "prebuilt-layout",
+                BinaryData.FromStream(fileStream));
+
+            AnalyzeResult result = operation.Value;
+
+            foreach (DocumentPage page in result.Pages)
+            {
+                float originalWidthInches = (float)page.Width;
+                float originalHeightInches = (float)page.Height;
+                float scaleX = targetWidth / originalWidthInches * 2;
+                float scaleY = targetHeight / originalHeightInches * 2;
+
+                List<OcrBox> ocrTexts = new List<OcrBox>();
+                for (int i = 0; i < page.Lines.Count; i++)
+                {
+                    DocumentLine line = page.Lines[i];
+                    ocrTexts.Add(new OcrBox()
+                    {
+                        Text = line.Content,
+                        Rectangle = GetBoundingRectangle(line.Polygon.ToList(), scaleX, scaleY)
+                    });
+                }
+                pages.Add(new OcrPage()
+                {
+                    OcrBoxes = ocrTexts,
+                    pageNum = page.PageNumber,
+                });
+            }
+        }
+
+        pdf = new Pdf()
+        {
+            Path = path,
+            Pages = pages,
+        };
+        File.WriteAllText(jsonPath, JsonSerializer.Serialize(pdf));
+        return pdf;
+    }
+
+    private static Rectangle GetBoundingRectangle(List<float> polygon, float scaleX, float scaleY)
+    {
+        if (polygon.Count % 2 != 0)
+        {
+            throw new ArgumentException("Invalid polygon data. Points should be in pairs.");
+        }
+
+        float minX = float.MaxValue;
+        float minY = float.MaxValue;
+        float maxX = float.MinValue;
+        float maxY = float.MinValue;
+
+        for (int i = 0; i < polygon.Count; i += 2)
+        {
+            float xInches = polygon[i];
+            float yInches = polygon[i + 1];
+            float xPixels = xInches * scaleX;
+            float yPixels = yInches * scaleY;
+
+            if (xPixels < minX) minX = xPixels;
+            if (yPixels < minY) minY = yPixels;
+            if (xPixels > maxX) maxX = xPixels;
+            if (yPixels > maxY) maxY = yPixels;
+        }
+
+        return new Rectangle((int)minX, (int)minY, (int)(maxX - minX), (int)(maxY - minY));
+    }
     public FileItem ListAllItems()
     {
         if (!Directory.Exists(Path.GetFullPath(_rootFolderPath)))

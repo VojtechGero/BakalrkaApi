@@ -1,12 +1,17 @@
+using API.Services;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
 builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-//builder.Services.AddScoped<SearchService>();
+builder.Services.AddOptions<ApiKeySettings>()
+    .Bind(builder.Configuration.GetSection("ApiKey"))
+    .ValidateDataAnnotations()
+    .Validate(config => !string.IsNullOrEmpty(config.Key), "API Key is required");
+
+builder.Services.AddScoped<SearchService>();
 
 var app = builder.Build();
 
@@ -17,9 +22,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-
 app.UseAuthorization();
-
 app.MapControllers();
-
 app.Run();
