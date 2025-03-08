@@ -96,4 +96,18 @@ public class FileController : ControllerBase
         _fileService.CreateFolder(directoryPath);
         return Ok();
     }
+    [HttpPut("rename")]
+    public ActionResult RenameFile(string originalPath, string newName)
+    {
+        try
+        {
+            _fileService.RenameItem(originalPath, newName);
+            return Ok();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error renaming file");
+            return StatusCode(500, "Internal server error");
+        }
+    }
 }

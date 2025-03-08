@@ -284,4 +284,20 @@ public class FileService
     {
         Directory.CreateDirectory(directoryPath);
     }
+    public void RenameItem(string originalPath, string newName)
+    {
+        string jsonPath = Path.ChangeExtension(originalPath, ".json");
+        string directory = Path.GetDirectoryName(originalPath);
+        string newPath = Path.Combine(directory, newName);
+        string newJsonPath = Path.ChangeExtension(newPath, ".json");
+
+        // Rename PDF
+        File.Move(originalPath, newPath);
+
+        // Rename JSON if exists
+        if (File.Exists(jsonPath))
+        {
+            File.Move(jsonPath, newJsonPath);
+        }
+    }
 }
