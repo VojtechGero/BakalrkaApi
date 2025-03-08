@@ -1,6 +1,7 @@
 ﻿using API.Models;
 using Azure;
 using Azure.AI.DocumentIntelligence;
+using Microsoft.Extensions.Options;
 using System.Drawing;
 using System.Text.Json;
 
@@ -10,9 +11,9 @@ public class FileService
 {
     private readonly string _rootFolderPath = @"./dms";
     private readonly string _apiKey;
-    public FileService(string apiKey)
+    public FileService(IOptions<ApiKeySettings> apiKeyOptions)
     {
-        _apiKey = apiKey;
+        _apiKey = apiKeyOptions.Value.Key;
 
     }
 
@@ -205,5 +206,82 @@ public class FileService
         }
 
         return folder;
+    }
+    public async Task UploadFileAsync(IFormFile file, string path)
+    {
+        if (file == null || file.Length == 0)
+        {
+            throw new ArgumentException("Invalid file");
+        }
+
+        if (string.IsNullOrWhiteSpace(path) || path.IndexOfAny(Path.GetInvalidPathChars()) >= 0)
+        {
+            throw new ArgumentException("Invalid path");
+        }
+
+        var fileName = file.FileName;
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            throw new ArgumentException("Filename is required");
+        }
+
+        try
+        {
+            Directory.CreateDirectory(path);
+            var filePath = Path.Combine(path, fileName);
+
+            using (var stream = new FileStream(filePath, FileMode.Create))
+            {
+                await file.CopyToAsync(stream);
+            }
+
+        }
+        catch (Exception ex)
+        {
+            throw;
+        }
+    }
+    public void CopyItem(string selectedPdfPath, string destination)
+    {
+        string jsonPath = Path.ChangeExtension(selectedPdfPath, ".json");
+
+        Directory.CreateDirectory(destination);
+
+        string pdfFileName = Path.GetFileName(selectedPdfPath);
+        string destPdfPath = Path.Combine(destination, pdfFileName);
+        File.Copy(selectedPdfPath, destPdfPath, overwrite: true);
+
+        string jsonFileName = Path.GetFileName(jsonPath);
+        string destJsonPath = Path.Combine(destination, jsonFileName);
+        File.Copy(jsonPath, destJsonPath, overwrite: true);
+    }
+    public void MoveItem(string selectedPdfPath, string destination)
+    {
+        string jsonPath = Path.ChangeExtension(selectedPdfPath, ".json");
+
+        Directory.CreateDirectory(destination);
+
+        string pdfFileName = Path.GetFileName(selectedPdfPath);
+        string destPdfPath = Path.Combine(destination, pdfFileName);
+        if (File.Exists(destPdfPath)) File.Delete(destPdfPath);
+        File.Move(selectedPdfPath, destPdfPath);
+
+        string jsonFileName = Path.GetFileName(jsonPath);
+        string destJsonPath = Path.Combine(destination, jsonFileName);
+        if (File.Exists(destJsonPath)) File.Delete(destJsonPath);
+        File.Move(jsonPath, destJsonPath);
+    }
+
+    public void DeleteItem(string selectedPdfPath)
+    {
+        string jsonPath = Path.ChangeExtension(selectedPdfPath, ".json");
+
+        File.Delete(selectedPdfPath);
+        File.Delete(jsonPath);
+    }
+
+    public void CreateFolder(string directoryPath)
+    {
+        Directory.CreateDirectory(directoryPath);
     }
 }
