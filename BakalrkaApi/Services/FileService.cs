@@ -248,12 +248,43 @@ public class FileService
         Directory.CreateDirectory(destination);
 
         string pdfFileName = Path.GetFileName(selectedPdfPath);
-        string destPdfPath = Path.Combine(destination, pdfFileName);
-        File.Copy(selectedPdfPath, destPdfPath, overwrite: true);
+        string destPdfPath = GetUniqueFileName(destination, pdfFileName);
+        File.Copy(selectedPdfPath, destPdfPath);
 
-        string jsonFileName = Path.GetFileName(jsonPath);
-        string destJsonPath = Path.Combine(destination, jsonFileName);
-        File.Copy(jsonPath, destJsonPath, overwrite: true);
+        string destJsonPath = Path.ChangeExtension(destPdfPath, ".json");
+        File.Copy(jsonPath, destJsonPath);
+        Pdf jsonContent = JsonSerializer.Deserialize<Pdf>(File.ReadAllText(destJsonPath));
+        jsonContent.Path = destPdfPath;
+        File.WriteAllText(JsonSerializer.Serialize(jsonContent), destJsonPath);
+    }
+
+    private string GetUniqueFileName(string directory, string fileName)
+    {
+        string baseName = Path.GetFileNameWithoutExtension(fileName);
+        string extension = Path.GetExtension(fileName);
+        int counter = 1;
+
+        while (true)
+        {
+            string newFileName = $"{baseName}{GetCopySuffix(counter)}{extension}";
+            string fullPath = Path.Combine(directory, newFileName);
+
+            if (!File.Exists(fullPath))
+            {
+                return fullPath;
+            }
+
+            counter++;
+        }
+    }
+
+    private string GetCopySuffix(int counter)
+    {
+        return counter switch
+        {
+            1 => " - copy",
+            _ => $" - copy ({counter - 1})"
+        };
     }
     public void MoveItem(string selectedPdfPath, string destination)
     {
@@ -262,15 +293,17 @@ public class FileService
         Directory.CreateDirectory(destination);
 
         string pdfFileName = Path.GetFileName(selectedPdfPath);
-        string destPdfPath = Path.Combine(destination, pdfFileName);
-        if (File.Exists(destPdfPath)) File.Delete(destPdfPath);
+        string destPdfPath = GetUniqueFileName(destination, pdfFileName);
         File.Move(selectedPdfPath, destPdfPath);
 
-        string jsonFileName = Path.GetFileName(jsonPath);
-        string destJsonPath = Path.Combine(destination, jsonFileName);
-        if (File.Exists(destJsonPath)) File.Delete(destJsonPath);
+        string destJsonPath = Path.ChangeExtension(destPdfPath, ".json");
         File.Move(jsonPath, destJsonPath);
+        Pdf jsonContent = JsonSerializer.Deserialize<Pdf>(File.ReadAllText(destJsonPath));
+        jsonContent.Path = destPdfPath;
+        File.WriteAllText(JsonSerializer.Serialize(jsonContent), destJsonPath);
+
     }
+
 
     public void DeleteItem(string selectedPdfPath)
     {
@@ -291,13 +324,12 @@ public class FileService
         string newPath = Path.Combine(directory, newName);
         string newJsonPath = Path.ChangeExtension(newPath, ".json");
 
-        // Rename PDF
         File.Move(originalPath, newPath);
 
-        // Rename JSON if exists
-        if (File.Exists(jsonPath))
-        {
-            File.Move(jsonPath, newJsonPath);
-        }
+        File.Move(jsonPath, newJsonPath);
+        Pdf jsonContent = JsonSerializer.Deserialize<Pdf>(File.ReadAllText(newJsonPath));
+        jsonContent.Path = newPath;
+        File.WriteAllText(JsonSerializer.Serialize(jsonContent), newJsonPath);
+
     }
 }
