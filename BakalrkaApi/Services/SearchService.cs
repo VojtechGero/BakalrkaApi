@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace API.Services;
 public class SearchService
 {
-    private readonly string _folderPath = @"../BakalarkaWpf/bin/Debug/net8.0-windows/data";
+    private readonly string _folderPath = @"./dms";
 
     public SearchService()
     {
