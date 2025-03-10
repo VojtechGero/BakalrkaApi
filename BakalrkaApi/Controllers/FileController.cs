@@ -91,7 +91,7 @@ public class FileController : ControllerBase
     }
 
     [HttpPost("create-folder")]
-    public ActionResult CreateFolder(string directoryPath)
+    public ActionResult CreateFolder([FromForm] string directoryPath)
     {
         _fileService.CreateFolder(directoryPath);
         return Ok();
