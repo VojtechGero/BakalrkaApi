@@ -2,7 +2,6 @@
 using API.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
-using Microsoft.Extensions.Options;
 
 namespace API.Controllers;
 
@@ -12,17 +11,10 @@ public class FileController : ControllerBase
 {
     private readonly ILogger<SearchController> _logger;
     private readonly FileService _fileService;
-    private readonly string _apiKey;
-    public FileController(ILogger<SearchController> logger, IOptions<ApiKeySettings> apiKeyOptions)
+    public FileController(ILogger<SearchController> logger, FileService fileService)
     {
-        _apiKey = apiKeyOptions.Value.Key;
-        // Ensure key is not empty
-        if (string.IsNullOrEmpty(_apiKey))
-        {
-            throw new ArgumentException("API Key is missing");
-        }
         _logger = logger;
-        _fileService = new FileService(_apiKey);
+        _fileService = fileService;
     }
     [HttpGet("list")]
     public List<FileItem> GetTopLevel(string path)
@@ -36,6 +28,7 @@ public class FileController : ControllerBase
         var FileItems = _fileService.ListAllItems();
         return FileItems;
     }
+
     [HttpGet("file")]
     public ActionResult GetFile(string path)
     {
@@ -54,29 +47,20 @@ public class FileController : ControllerBase
     [HttpPost("upload")]
     public async Task<IActionResult> UploadFile(IFormFile file, [FromForm] string path)
     {
-        if (file == null || file.Length == 0)
-        {
-            return BadRequest("No file uploaded or file is empty.");
-        }
-
         try
         {
-            Directory.CreateDirectory(path);
-
-            var filePath = Path.Combine(path, file.FileName);
-
-            using (var stream = new FileStream(filePath, FileMode.Create))
-            {
-                await file.CopyToAsync(stream);
-            }
-
-            _logger.LogInformation($"File uploaded successfully: {filePath}");
+            await _fileService.UploadFileAsync(file, path);
             return Ok(new { Message = "File uploaded successfully", FileName = file.FileName });
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex.Message);
+            return BadRequest(ex.Message);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error occurred while uploading the file.");
-            return StatusCode(500, "Internal server error while uploading the file.");
+            _logger.LogError(ex, "Error uploading file");
+            return StatusCode(500, "Internal server error");
         }
     }
     [HttpGet("ocr")]
@@ -84,5 +68,46 @@ public class FileController : ControllerBase
     {
         var pdf = await _fileService.GetPdfOcr(path, height, width);
         return pdf;
+    }
+
+    [HttpGet("copy")]
+    public ActionResult CopyFile(string selectedItem, string destination)
+    {
+        _fileService.CopyItem(selectedItem, destination);
+        return Ok();
+    }
+    [HttpPut("move")]
+    public ActionResult MoveFile(string selectedItem, string destination)
+    {
+        _fileService.MoveItem(selectedItem, destination);
+        return Ok();
+    }
+
+    [HttpDelete("delete")]
+    public ActionResult DeleteFile(string selectedItem)
+    {
+        _fileService.DeleteItem(selectedItem);
+        return Ok();
+    }
+
+    [HttpPost("create-folder")]
+    public ActionResult CreateFolder([FromForm] string directoryPath)
+    {
+        _fileService.CreateFolder(directoryPath);
+        return Ok();
+    }
+    [HttpPut("rename")]
+    public ActionResult RenameFile(string originalPath, string newName)
+    {
+        try
+        {
+            _fileService.RenameItem(originalPath, newName);
+            return Ok();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error renaming file");
+            return StatusCode(500, "Internal server error");
+        }
     }
 }

@@ -12,6 +12,7 @@ builder.Services.AddOptions<ApiKeySettings>()
     .Validate(config => !string.IsNullOrEmpty(config.Key), "API Key is required");
 
 builder.Services.AddScoped<SearchService>();
+builder.Services.AddScoped<FileService>();
 
 var app = builder.Build();
 

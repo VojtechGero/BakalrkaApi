@@ -1,6 +1,7 @@
 ﻿using API.Models;
 using Azure;
 using Azure.AI.DocumentIntelligence;
+using Microsoft.Extensions.Options;
 using System.Drawing;
 using System.Text.Json;
 
@@ -10,9 +11,9 @@ public class FileService
 {
     private readonly string _rootFolderPath = @"./dms";
     private readonly string _apiKey;
-    public FileService(string apiKey)
+    public FileService(IOptions<ApiKeySettings> apiKeyOptions)
     {
-        _apiKey = apiKey;
+        _apiKey = apiKeyOptions.Value.Key;
 
     }
 
@@ -206,4 +207,398 @@ public class FileService
 
         return folder;
     }
+    public async Task UploadFileAsync(IFormFile file, string path)
+    {
+        if (file == null || file.Length == 0)
+        {
+            throw new ArgumentException("Invalid file");
+        }
+
+        if (string.IsNullOrWhiteSpace(path) || path.IndexOfAny(Path.GetInvalidPathChars()) >= 0)
+        {
+            throw new ArgumentException("Invalid path");
+        }
+
+        var fileName = file.FileName;
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            throw new ArgumentException("Filename is required");
+        }
+
+        try
+        {
+            Directory.CreateDirectory(path);
+            var filePath = Path.Combine(path, fileName);
+
+            using (var stream = new FileStream(filePath, FileMode.Create))
+            {
+                await file.CopyToAsync(stream);
+            }
+
+        }
+        catch (Exception ex)
+        {
+            throw;
+        }
+    }
+    public void CopyItem(string sourcePath, string destinationRoot)
+    {
+        if (!File.Exists(sourcePath) && !Directory.Exists(sourcePath))
+        {
+            throw new FileNotFoundException("The source path does not exist.", sourcePath);
+        }
+
+        // Determine if we're dealing with a file or directory
+        bool isDirectory = Directory.Exists(sourcePath);
+
+        // Create target path that preserves the original folder structure
+        string targetBasePath = isDirectory
+            ? Path.Combine(destinationRoot, Path.GetFileName(sourcePath))
+            : destinationRoot;
+
+        Directory.CreateDirectory(targetBasePath);
+
+        if (isDirectory)
+        {
+            // Create directory structure recursively
+            foreach (string dirPath in Directory.GetDirectories(sourcePath, "*", SearchOption.AllDirectories))
+            {
+                string relativePath = Path.GetRelativePath(sourcePath, dirPath);
+                Directory.CreateDirectory(Path.Combine(targetBasePath, relativePath));
+            }
+
+            // Process all PDF files
+            foreach (string filePath in Directory.GetFiles(sourcePath, "*.pdf", SearchOption.AllDirectories))
+            {
+                ProcessFile(filePath, sourcePath, targetBasePath);
+            }
+        }
+        else
+        {
+            // Process single file
+            ProcessFile(sourcePath, Path.GetDirectoryName(sourcePath), targetBasePath);
+        }
+    }
+
+    private void ProcessFile(string sourceFilePath, string sourceRoot, string targetRoot)
+    {
+        // Get relative path from source root
+        string relativePath = Path.GetRelativePath(sourceRoot, sourceFilePath);
+        string targetFilePath = Path.Combine(targetRoot, relativePath);
+
+        // Ensure unique filename
+        targetFilePath = GetUniqueFileName(Path.GetDirectoryName(targetFilePath), Path.GetFileName(targetFilePath));
+
+        // Copy PDF file
+        File.Copy(sourceFilePath, targetFilePath);
+
+        // Process JSON counterpart
+        string sourceJsonPath = Path.ChangeExtension(sourceFilePath, ".json");
+        string targetJsonPath = Path.ChangeExtension(targetFilePath, ".json");
+
+        if (File.Exists(sourceJsonPath))
+        {
+            File.Copy(sourceJsonPath, targetJsonPath);
+
+            // Update JSON path reference
+            var jsonContent = JsonSerializer.Deserialize<Pdf>(File.ReadAllText(targetJsonPath));
+            jsonContent.Path = targetFilePath;
+            File.WriteAllText(targetJsonPath, JsonSerializer.Serialize(jsonContent));
+        }
+    }
+
+
+
+    private string GetUniqueFileName(string directory, string fileName)
+    {
+        string baseName = Path.GetFileNameWithoutExtension(fileName);
+        string extension = Path.GetExtension(fileName);
+        int counter = 1;
+
+        while (true)
+        {
+            string newFileName = $"{baseName}{GetCopySuffix(counter)}{extension}";
+            string fullPath = Path.Combine(directory, newFileName);
+
+            if (!File.Exists(fullPath))
+            {
+                return fullPath;
+            }
+
+            counter++;
+        }
+    }
+
+    private string GetCopySuffix(int counter)
+    {
+        return counter switch
+        {
+            1 => " - copy",
+            _ => $" - copy ({counter - 1})"
+        };
+    }
+    public void MoveItem(string sourcePath, string destinationRoot)
+    {
+        if (!File.Exists(sourcePath) && !Directory.Exists(sourcePath))
+            throw new FileNotFoundException("Source path not found", sourcePath);
+
+        bool isDirectory = Directory.Exists(sourcePath);
+        string originalSource = sourcePath; // Store original path for cleanup
+        string targetBasePath = isDirectory
+            ? GetUniqueDirectoryName(destinationRoot, Path.GetFileName(sourcePath))
+            : destinationRoot;
+
+        Directory.CreateDirectory(targetBasePath);
+
+        if (isDirectory)
+        {
+            // Move ALL files recursively
+            foreach (string filePath in Directory.GetFiles(sourcePath, "*", SearchOption.AllDirectories))
+            {
+                MoveFileSystemEntry(filePath, sourcePath, targetBasePath);
+            }
+
+            // Delete empty directory structure
+            DeleteEntireSourceStructure(originalSource);
+        }
+        else
+        {
+            MoveFileSystemEntry(sourcePath, Path.GetDirectoryName(sourcePath), targetBasePath);
+            // Clean up original file's directory if empty
+            DeleteEmptyDirectory(Path.GetDirectoryName(sourcePath));
+        }
+    }
+
+    private void DeleteEntireSourceStructure(string sourcePath)
+    {
+        try
+        {
+            // First delete all subdirectories and files
+            Directory.Delete(sourcePath, true);
+        }
+        catch (IOException)
+        {
+            // Fallback: Try recursive deletion if delete with recursive=true failed
+            DeleteDirectoryRecursive(sourcePath);
+        }
+    }
+
+    private void DeleteDirectoryRecursive(string path)
+    {
+        foreach (string directory in Directory.GetDirectories(path))
+        {
+            DeleteDirectoryRecursive(directory);
+        }
+
+        foreach (string file in Directory.GetFiles(path))
+        {
+            File.Delete(file);
+        }
+
+        Directory.Delete(path);
+    }
+
+    private void MoveFileSystemEntry(string sourcePath, string sourceRoot, string targetRoot)
+    {
+        string relativePath = Path.GetRelativePath(sourceRoot, sourcePath);
+        string targetPath = Path.Combine(targetRoot, relativePath);
+
+        if (File.Exists(sourcePath))
+        {
+            string targetDir = Path.GetDirectoryName(targetPath);
+            Directory.CreateDirectory(targetDir);
+
+            string uniquePath = GetUniqueFileName(targetDir, Path.GetFileName(targetPath));
+            File.Move(sourcePath, uniquePath);
+
+            if (IsPdfFile(sourcePath))
+            {
+                MoveAssociatedJson(sourcePath, uniquePath);
+            }
+        }
+    }
+
+    private bool IsPdfFile(string path) =>
+        Path.GetExtension(path).Equals(".pdf", StringComparison.OrdinalIgnoreCase);
+
+    private void MoveAssociatedJson(string pdfSourcePath, string newPdfPath)
+    {
+        string sourceJson = Path.ChangeExtension(pdfSourcePath, ".json");
+        string targetJson = Path.ChangeExtension(newPdfPath, ".json");
+
+        if (File.Exists(sourceJson))
+        {
+            File.Move(sourceJson, targetJson);
+            UpdateJsonPath(targetJson, newPdfPath);
+        }
+    }
+
+    private void DeleteEmptyDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path) &&
+                !Directory.EnumerateFileSystemEntries(path).Any())
+            {
+                Directory.Delete(path);
+            }
+        }
+        catch { /* Ignore deletion errors */ }
+    }
+
+    private void UpdateJsonPath(string jsonPath, string newPdfPath)
+    {
+        Pdf jsonContent = JsonSerializer.Deserialize<Pdf>(File.ReadAllText(jsonPath));
+        jsonContent.Path = newPdfPath;
+        File.WriteAllText(jsonPath, JsonSerializer.Serialize(jsonContent));
+    }
+
+    private string GetUniqueDirectoryName(string parentDir, string dirName)
+    {
+        string targetDir = Path.Combine(parentDir, dirName);
+        int count = 1;
+
+        while (Directory.Exists(targetDir))
+        {
+            targetDir = Path.Combine(parentDir, $"{dirName} ({count++})");
+        }
+        return targetDir;
+    }
+
+    private void DeleteEmptyDirectories(string startDir)
+    {
+        foreach (string directory in Directory.GetDirectories(startDir))
+        {
+            DeleteEmptyDirectories(directory);
+            if (Directory.GetFiles(directory).Length == 0 &&
+                Directory.GetDirectories(directory).Length == 0)
+            {
+                Directory.Delete(directory);
+            }
+        }
+    }
+
+
+    public void DeleteItem(string path)
+    {
+        FileAttributes attr = File.GetAttributes(path);
+        bool isDirectory = (attr & FileAttributes.Directory) == FileAttributes.Directory;
+
+        try
+        {
+            if (isDirectory)
+            {
+                // Handle directory deletion
+                ClearDirectoryAttributes(path);
+                Directory.Delete(path, true);
+            }
+            else
+            {
+                // Handle file deletion
+                string jsonPath = Path.ChangeExtension(path, ".json");
+
+                // Delete JSON first
+                if (File.Exists(jsonPath))
+                {
+                    ClearFileAttributes(jsonPath);
+                    File.Delete(jsonPath);
+                }
+
+                // Delete PDF
+                ClearFileAttributes(path);
+                File.Delete(path);
+            }
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new InvalidOperationException($"Access denied: {ex.Message}", ex);
+        }
+        catch (IOException ex)
+        {
+            throw new InvalidOperationException($"File in use: {ex.Message}", ex);
+        }
+    }
+
+    private void ClearFileAttributes(string filePath)
+    {
+        if (!File.Exists(filePath)) return;
+
+        FileAttributes attributes = File.GetAttributes(filePath);
+        if ((attributes & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
+        {
+            File.SetAttributes(filePath, attributes & ~FileAttributes.ReadOnly);
+        }
+    }
+
+    private void ClearDirectoryAttributes(string dirPath)
+    {
+        // Clear attributes from directory itself
+        FileAttributes dirAttr = File.GetAttributes(dirPath);
+        if ((dirAttr & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
+        {
+            File.SetAttributes(dirPath, dirAttr & ~FileAttributes.ReadOnly);
+        }
+
+        // Clear attributes from all contained files
+        foreach (string file in Directory.GetFiles(dirPath, "*", SearchOption.AllDirectories))
+        {
+            ClearFileAttributes(file);
+        }
+    }
+
+    public void CreateFolder(string directoryPath)
+    {
+        Directory.CreateDirectory(directoryPath);
+    }
+    public void RenameItem(string originalPath, string newName)
+    {
+        FileAttributes attr = File.GetAttributes(originalPath);
+        bool isDirectory = attr.HasFlag(FileAttributes.Directory);
+
+        if (!isDirectory)
+        {
+            // Handle file rename
+            string jsonPath = Path.ChangeExtension(originalPath, ".json");
+            string directory = Path.GetDirectoryName(originalPath);
+            string newPath = Path.Combine(directory, newName);
+
+            // Ensure .pdf extension
+            if (!newPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                newPath += ".pdf";
+
+            string newJsonPath = Path.ChangeExtension(newPath, ".json");
+
+            File.Move(originalPath, newPath);
+            File.Move(jsonPath, newJsonPath);
+
+            UpdateJsonPath(newJsonPath, newPath);
+        }
+        else
+        {
+            // Handle directory rename
+            string parentDir = Directory.GetParent(originalPath).FullName;
+            string newPath = Path.Combine(parentDir, newName);
+
+            if (Directory.Exists(newPath))
+                throw new IOException("Target directory already exists");
+
+            Directory.Move(originalPath, newPath);
+
+            // Update all JSON files in the directory hierarchy
+            UpdateJsonPathsInDirectory(newPath);
+        }
+    }
+
+    private void UpdateJsonPathsInDirectory(string directoryPath)
+    {
+        foreach (string jsonFile in Directory.EnumerateFiles(directoryPath, "*.json", SearchOption.AllDirectories))
+        {
+            string pdfPath = Path.ChangeExtension(jsonFile, ".pdf");
+            if (File.Exists(pdfPath))
+            {
+                UpdateJsonPath(jsonFile, pdfPath);
+            }
+        }
+    }
+
 }
