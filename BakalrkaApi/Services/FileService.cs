@@ -22,26 +22,26 @@ public class FileService
         List<FileItem> list = new List<FileItem>();
         var filePaths = Directory.EnumerateFiles(path, "*.json");
         var directoryPaths = Directory.EnumerateDirectories(path);
+        string rootParent = GetParentFolder(_rootFolderPath);
         if (Path.GetFullPath(_rootFolderPath) != Path.GetFullPath(path))
         {
             var parent = GetParentFolder(path);
             var root = new FileItem()
             {
                 IsDirectory = true,
-                Path = parent,
                 Name = $"Zpět na {Path.GetFileName(parent)}",
+                Path = Path.GetRelativePath(rootParent, parent),
                 SubItems = null
             };
             list.Add(root);
         }
-        string rootparent = GetParentFolder(_rootFolderPath);
         foreach (var directory in directoryPaths)
         {
             var item = new FileItem()
             {
                 IsDirectory = true,
                 Name = Path.GetFileName(directory),
-                Path = Path.GetRelativePath(rootparent, directory),
+                Path = Path.GetRelativePath(rootParent, directory),
                 SubItems = null
             };
             list.Add(item);
@@ -52,7 +52,7 @@ public class FileService
             {
                 IsDirectory = false,
                 Name = Path.ChangeExtension(Path.GetFileName(file), ".pdf"),
-                Path = Path.ChangeExtension(Path.GetRelativePath(rootparent, file), ".pdf"),
+                Path = Path.ChangeExtension(Path.GetRelativePath(rootParent, file), ".pdf"),
                 SubItems = null
             };
             list.Add(item);
