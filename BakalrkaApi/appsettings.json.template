@@ -6,7 +6,8 @@
     }
   },
   "AllowedHosts": "*",
-  "ApiKey": {
-    "Key" : ""
+  "Api": {
+    "Url": "",
+    "Key": ""
   }
 }

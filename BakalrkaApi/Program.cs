@@ -6,10 +6,11 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-builder.Services.AddOptions<ApiKeySettings>()
-    .Bind(builder.Configuration.GetSection("ApiKey"))
+builder.Services.AddOptions<ApiSettings>()
+    .Bind(builder.Configuration.GetSection("Api"))
     .ValidateDataAnnotations()
-    .Validate(config => !string.IsNullOrEmpty(config.Key), "API Key is required");
+    .Validate(config => !string.IsNullOrEmpty(config.Key), "API Key is required")
+    .Validate(config => !string.IsNullOrEmpty(config.Url), "Url is required");
 
 builder.Services.AddScoped<SearchService>();
 builder.Services.AddScoped<FileService>();

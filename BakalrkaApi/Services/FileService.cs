@@ -11,10 +11,11 @@ public class FileService
 {
     private readonly string _rootFolderPath = @"./dms";
     private readonly string _apiKey;
-    public FileService(IOptions<ApiKeySettings> apiKeyOptions)
+    private readonly string _apiUrl;
+    public FileService(IOptions<ApiSettings> apiKeyOptions)
     {
         _apiKey = apiKeyOptions.Value.Key;
-
+        _apiUrl = apiKeyOptions.Value.Url;
     }
 
     public List<FileItem> ListAllTopItems(string path)
@@ -65,15 +66,6 @@ public class FileService
         return parentDirectory.FullName;
     }
 
-    /*
-    public FileContentResult? GetFile(string filePath)
-    {
-        if (File.Exists(filePath))
-        {
-            return File(filePath, "application/pdf", "test.pdf");
-        }
-    }
-    */
     public async Task<Pdf> GetPdfOcr(string path, int targetHeight, int targetWidth)
     {
         Pdf pdf;
@@ -87,13 +79,12 @@ public class FileService
             return pdf;
         }
 
-        string AiPath = @"https://bakalarkaai.cognitiveservices.azure.com/";
         List<OcrPage> pages = new();
 
         using (FileStream fileStream = new FileStream(path, FileMode.Open))
         {
             var key = _apiKey; // Ensure this is populated from configuration
-            var client = new DocumentIntelligenceClient(new Uri(AiPath), new AzureKeyCredential(key));
+            var client = new DocumentIntelligenceClient(new Uri(_apiUrl), new AzureKeyCredential(key));
 
             Operation<AnalyzeResult> operation = await client.AnalyzeDocumentAsync(
                 WaitUntil.Completed,
@@ -248,10 +239,8 @@ public class FileService
             throw new FileNotFoundException("The source path does not exist.", sourcePath);
         }
 
-        // Determine if we're dealing with a file or directory
         bool isDirectory = Directory.Exists(sourcePath);
 
-        // Create target path that preserves the original folder structure
         string targetBasePath = isDirectory
             ? Path.Combine(destinationRoot, Path.GetFileName(sourcePath))
             : destinationRoot;
@@ -260,14 +249,12 @@ public class FileService
 
         if (isDirectory)
         {
-            // Create directory structure recursively
             foreach (string dirPath in Directory.GetDirectories(sourcePath, "*", SearchOption.AllDirectories))
             {
                 string relativePath = Path.GetRelativePath(sourcePath, dirPath);
                 Directory.CreateDirectory(Path.Combine(targetBasePath, relativePath));
             }
 
-            // Process all PDF files
             foreach (string filePath in Directory.GetFiles(sourcePath, "*.pdf", SearchOption.AllDirectories))
             {
                 ProcessFile(filePath, sourcePath, targetBasePath);
@@ -275,24 +262,19 @@ public class FileService
         }
         else
         {
-            // Process single file
             ProcessFile(sourcePath, Path.GetDirectoryName(sourcePath), targetBasePath);
         }
     }
 
     private void ProcessFile(string sourceFilePath, string sourceRoot, string targetRoot)
     {
-        // Get relative path from source root
         string relativePath = Path.GetRelativePath(sourceRoot, sourceFilePath);
         string targetFilePath = Path.Combine(targetRoot, relativePath);
 
-        // Ensure unique filename
         targetFilePath = GetUniqueFileName(Path.GetDirectoryName(targetFilePath), Path.GetFileName(targetFilePath));
 
-        // Copy PDF file
         File.Copy(sourceFilePath, targetFilePath);
 
-        // Process JSON counterpart
         string sourceJsonPath = Path.ChangeExtension(sourceFilePath, ".json");
         string targetJsonPath = Path.ChangeExtension(targetFilePath, ".json");
 
@@ -300,7 +282,6 @@ public class FileService
         {
             File.Copy(sourceJsonPath, targetJsonPath);
 
-            // Update JSON path reference
             var jsonContent = JsonSerializer.Deserialize<Pdf>(File.ReadAllText(targetJsonPath));
             jsonContent.Path = targetFilePath;
             File.WriteAllText(targetJsonPath, JsonSerializer.Serialize(jsonContent));
@@ -352,19 +333,16 @@ public class FileService
 
         if (isDirectory)
         {
-            // Move ALL files recursively
             foreach (string filePath in Directory.GetFiles(sourcePath, "*", SearchOption.AllDirectories))
             {
                 MoveFileSystemEntry(filePath, sourcePath, targetBasePath);
             }
 
-            // Delete empty directory structure
             DeleteEntireSourceStructure(originalSource);
         }
         else
         {
             MoveFileSystemEntry(sourcePath, Path.GetDirectoryName(sourcePath), targetBasePath);
-            // Clean up original file's directory if empty
             DeleteEmptyDirectory(Path.GetDirectoryName(sourcePath));
         }
     }
@@ -373,12 +351,10 @@ public class FileService
     {
         try
         {
-            // First delete all subdirectories and files
             Directory.Delete(sourcePath, true);
         }
         catch (IOException)
         {
-            // Fallback: Try recursive deletion if delete with recursive=true failed
             DeleteDirectoryRecursive(sourcePath);
         }
     }

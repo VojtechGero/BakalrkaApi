@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace API.Services;
 public class SearchService
 {
-    private readonly string _folderPath = @"./dms";
+    private readonly string _rootFolderPath = @"./dms";
 
     public SearchService()
     {
@@ -13,13 +13,14 @@ public class SearchService
     public async Task<List<SearchResult>> SearchAsync(string query)
     {
         var results = new List<SearchResult>();
-        var jsonFiles = Directory.EnumerateFiles(_folderPath, "*.json", SearchOption.AllDirectories);
+        var jsonFiles = Directory.EnumerateFiles(_rootFolderPath, "*.json", SearchOption.AllDirectories);
 
         foreach (var file in jsonFiles)
         {
             var jsonContent = await File.ReadAllTextAsync(file);
             query = query.Trim().ToLower();
             var pdf = JsonSerializer.Deserialize<Pdf>(jsonContent);
+            string rootParent = GetParentFolder(_rootFolderPath);
 
             if (pdf == null) continue;
 
@@ -36,7 +37,7 @@ public class SearchService
                     {
                         results.Add(new SearchResult
                         {
-                            FilePath = Path.ChangeExtension(Path.GetFullPath(file), ".pdf"),
+                            FilePath = Path.ChangeExtension(Path.GetRelativePath(rootParent, file), ".pdf"),
                             PageNumber = page.pageNum,
                             MatchedText = combinedText.Substring(matchIndex, query.Length),
                             MatchIndex = matchIndex,
@@ -88,5 +89,10 @@ public class SearchService
             }
         }
         return results;
+    }
+    private string GetParentFolder(string filePath)
+    {
+        DirectoryInfo parentDirectory = Directory.GetParent(filePath);
+        return parentDirectory.FullName;
     }
 }
