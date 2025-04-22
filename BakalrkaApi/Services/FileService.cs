@@ -104,10 +104,14 @@ public class FileService
                 for (int i = 0; i < page.Lines.Count; i++)
                 {
                     DocumentLine line = page.Lines[i];
+                    var boundingRectangle = GetBoundingRectangle(line.Polygon.ToList(), scaleX, scaleY);
                     ocrTexts.Add(new OcrBox()
                     {
                         Text = line.Content,
-                        Rectangle = GetBoundingRectangle(line.Polygon.ToList(), scaleX, scaleY)
+                        X = boundingRectangle.X,
+                        Y = boundingRectangle.Y,
+                        Width = boundingRectangle.Width,
+                        Height = boundingRectangle.Height
                     });
                 }
                 pages.Add(new OcrPage()
