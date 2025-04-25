@@ -175,10 +175,11 @@ public class FileService
             folderName = path;
         }
 
+        string rootParent = GetParentFolder(_rootFolderPath);
         var folder = new FileItem
         {
             Name = folderName,
-            Path = path,
+            Path = Path.GetRelativePath(rootParent, path),
             IsDirectory = true,
             SubItems = new List<FileItem>()
         };
