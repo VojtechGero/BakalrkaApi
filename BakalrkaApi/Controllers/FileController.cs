@@ -32,7 +32,7 @@ public class FileController : ControllerBase
     [HttpGet("file")]
     public ActionResult GetFile(string path)
     {
-        byte[] fileBytes = System.IO.File.ReadAllBytes(path);
+        byte[] fileBytes = _fileService.GetFileBytes(path);
 
         var provider = new FileExtensionContentTypeProvider();
         if (!provider.TryGetContentType(path, out string contentType))

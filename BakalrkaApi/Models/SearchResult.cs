@@ -8,5 +8,4 @@ public class SearchResult
     public string MatchedText { get; set; }
     public int MatchIndex { get; set; }
     public int BoxIndex { get; set; }
-    public int BoxSpan { get; set; }
 }

@@ -23,16 +23,7 @@ public class SearchController : ControllerBase
     public async Task<IEnumerable<FileResults>> GetResults(string query)
     {
         var results = await _searchService.SearchAsync(query);
-        var fileResults = results
-        .GroupBy(sr => sr.FilePath)
-        .Select(group => new FileResults
-        {
-            Query = query,
-            FilePath = group.Key,
-            OccurrenceCount = group.Count()
-        })
-        .ToList();
-        return fileResults;
+        return results;
     }
     [HttpGet("result")]
     public async Task<List<SearchResult>> GetResult(string query, string fileName)
@@ -40,8 +31,5 @@ public class SearchController : ControllerBase
         var result = await _searchService.SearchFileAsync(query, fileName);
         return result;
     }
-    /*
-    
-    */
 }
 

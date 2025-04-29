@@ -203,6 +203,12 @@ public class FileService
 
         return folder;
     }
+
+    public byte[] GetFileBytes(string path)
+    {
+        return System.IO.File.ReadAllBytes(path);
+    }
+
     public async Task UploadFileAsync(IFormFile file, string path)
     {
         if (file == null || file.Length == 0)
