@@ -1,8 +1,5 @@
 ﻿using API.Models;
-using Azure;
-using Azure.AI.DocumentIntelligence;
-using Microsoft.Extensions.Options;
-using System.Drawing;
+using BakalrkaApi.Services;
 using System.Text.Json;
 
 namespace API.Services;
@@ -10,12 +7,10 @@ namespace API.Services;
 public class FileService
 {
     private readonly string _rootFolderPath = @"./dms";
-    private readonly string _apiKey;
-    private readonly string _apiUrl;
-    public FileService(IOptions<ApiSettings> apiKeyOptions)
+    private readonly OcrService _ocrService;
+    public FileService(OcrService ocrService)
     {
-        _apiKey = apiKeyOptions.Value.Key;
-        _apiUrl = apiKeyOptions.Value.Url;
+        _ocrService = ocrService;
     }
 
     public List<FileItem> ListAllTopItems(string path)
@@ -26,40 +21,47 @@ public class FileService
         string rootParent = GetParentFolder(_rootFolderPath);
         if (Path.GetFullPath(_rootFolderPath) != Path.GetFullPath(path))
         {
-            var parent = GetParentFolder(path);
-            var root = new FileItem()
-            {
-                IsDirectory = true,
-                Name = $"Zpět na {Path.GetFileName(parent)}",
-                Path = Path.GetRelativePath(rootParent, parent),
-                SubItems = null
-            };
-            list.Add(root);
+            list.Add(CreateBackItem(path, rootParent));
         }
-        foreach (var directory in directoryPaths)
-        {
-            var item = new FileItem()
-            {
-                IsDirectory = true,
-                Name = Path.GetFileName(directory),
-                Path = Path.GetRelativePath(rootParent, directory),
-                SubItems = null
-            };
-            list.Add(item);
-        }
-        foreach (var file in filePaths)
-        {
-            var item = new FileItem()
-            {
-                IsDirectory = false,
-                Name = Path.ChangeExtension(Path.GetFileName(file), ".pdf"),
-                Path = Path.ChangeExtension(Path.GetRelativePath(rootParent, file), ".pdf"),
-                SubItems = null
-            };
-            list.Add(item);
-        }
+
+        list.AddRange(GetDirectoryItems(path, rootParent));
+        list.AddRange(GetFileItems(path, rootParent));
         return list;
     }
+    private FileItem CreateBackItem(string currentPath, string rootParent)
+    {
+        var parent = Directory.GetParent(currentPath)!.FullName;
+        return new FileItem
+        {
+            IsDirectory = true,
+            Name = $"Zpět na {Path.GetFileName(parent)}",
+            Path = Path.GetRelativePath(rootParent, parent),
+            SubItems = null
+        };
+    }
+    private IEnumerable<FileItem> GetDirectoryItems(string path, string rootParent)
+        => Directory.EnumerateDirectories(path)
+            .Select(dir => CreateDirectoryItem(dir, rootParent));
+
+    private IEnumerable<FileItem> GetFileItems(string path, string rootParent)
+        => Directory.EnumerateFiles(path, "*.json")
+            .Select(file => CreateJsonFileItem(file, rootParent));
+    private FileItem CreateDirectoryItem(string path, string rootParent) => new()
+    {
+        IsDirectory = true,
+        Name = Path.GetFileName(path),
+        Path = Path.GetRelativePath(rootParent, path),
+        SubItems = null
+    };
+
+
+    private FileItem CreateJsonFileItem(string jsonPath, string rootParent) => new()
+    {
+        IsDirectory = false,
+        Name = Path.ChangeExtension(Path.GetFileName(jsonPath), ".pdf"),
+        Path = Path.ChangeExtension(Path.GetRelativePath(rootParent, jsonPath), ".pdf"),
+        SubItems = null
+    };
     private string GetParentFolder(string filePath)
     {
         DirectoryInfo parentDirectory = Directory.GetParent(filePath);
@@ -79,84 +81,7 @@ public class FileService
             return pdf;
         }
 
-        List<OcrPage> pages = new();
-
-        using (FileStream fileStream = new FileStream(path, FileMode.Open))
-        {
-            var key = _apiKey; // Ensure this is populated from configuration
-            var client = new DocumentIntelligenceClient(new Uri(_apiUrl), new AzureKeyCredential(key));
-
-            Operation<AnalyzeResult> operation = await client.AnalyzeDocumentAsync(
-                WaitUntil.Completed,
-                "prebuilt-layout",
-                BinaryData.FromStream(fileStream));
-
-            AnalyzeResult result = operation.Value;
-
-            foreach (DocumentPage page in result.Pages)
-            {
-                float originalWidthInches = (float)page.Width;
-                float originalHeightInches = (float)page.Height;
-                float scaleX = targetWidth / originalWidthInches * 2;
-                float scaleY = targetHeight / originalHeightInches * 2;
-
-                List<OcrBox> ocrTexts = new List<OcrBox>();
-                for (int i = 0; i < page.Lines.Count; i++)
-                {
-                    DocumentLine line = page.Lines[i];
-                    var boundingRectangle = GetBoundingRectangle(line.Polygon.ToList(), scaleX, scaleY);
-                    ocrTexts.Add(new OcrBox()
-                    {
-                        Text = line.Content,
-                        X = boundingRectangle.X,
-                        Y = boundingRectangle.Y,
-                        Width = boundingRectangle.Width,
-                        Height = boundingRectangle.Height
-                    });
-                }
-                pages.Add(new OcrPage()
-                {
-                    OcrBoxes = ocrTexts,
-                    pageNum = page.PageNumber,
-                });
-            }
-        }
-
-        pdf = new Pdf()
-        {
-            Path = path,
-            Pages = pages,
-        };
-        File.WriteAllText(jsonPath, JsonSerializer.Serialize(pdf));
-        return pdf;
-    }
-
-    private static Rectangle GetBoundingRectangle(List<float> polygon, float scaleX, float scaleY)
-    {
-        if (polygon.Count % 2 != 0)
-        {
-            throw new ArgumentException("Invalid polygon data. Points should be in pairs.");
-        }
-
-        float minX = float.MaxValue;
-        float minY = float.MaxValue;
-        float maxX = float.MinValue;
-        float maxY = float.MinValue;
-
-        for (int i = 0; i < polygon.Count; i += 2)
-        {
-            float xInches = polygon[i];
-            float yInches = polygon[i + 1];
-            float xPixels = xInches * scaleX;
-            float yPixels = yInches * scaleY;
-
-            if (xPixels < minX) minX = xPixels;
-            if (yPixels < minY) minY = yPixels;
-            if (xPixels > maxX) maxX = xPixels;
-            if (yPixels > maxY) maxY = yPixels;
-        }
-
-        return new Rectangle((int)minX, (int)minY, (int)(maxX - minX), (int)(maxY - minY));
+        return await _ocrService.GetPdfOcr(path, targetHeight, targetWidth);
     }
     public FileItem ListAllItems()
     {
@@ -243,39 +168,7 @@ public class FileService
             throw;
         }
     }
-    public void CopyItem(string sourcePath, string destinationRoot)
-    {
-        if (!File.Exists(sourcePath) && !Directory.Exists(sourcePath))
-        {
-            throw new FileNotFoundException("The source path does not exist.", sourcePath);
-        }
 
-        bool isDirectory = Directory.Exists(sourcePath);
-
-        string targetBasePath = isDirectory
-            ? Path.Combine(destinationRoot, Path.GetFileName(sourcePath))
-            : destinationRoot;
-
-        Directory.CreateDirectory(targetBasePath);
-
-        if (isDirectory)
-        {
-            foreach (string dirPath in Directory.GetDirectories(sourcePath, "*", SearchOption.AllDirectories))
-            {
-                string relativePath = Path.GetRelativePath(sourcePath, dirPath);
-                Directory.CreateDirectory(Path.Combine(targetBasePath, relativePath));
-            }
-
-            foreach (string filePath in Directory.GetFiles(sourcePath, "*.pdf", SearchOption.AllDirectories))
-            {
-                ProcessFile(filePath, sourcePath, targetBasePath);
-            }
-        }
-        else
-        {
-            ProcessFile(sourcePath, Path.GetDirectoryName(sourcePath), targetBasePath);
-        }
-    }
 
     private void ProcessFile(string sourceFilePath, string sourceRoot, string targetRoot)
     {
@@ -335,7 +228,7 @@ public class FileService
             throw new FileNotFoundException("Source path not found", sourcePath);
 
         bool isDirectory = Directory.Exists(sourcePath);
-        string originalSource = sourcePath; // Store original path for cleanup
+        string originalSource = sourcePath;
         string targetBasePath = isDirectory
             ? GetUniqueDirectoryName(destinationRoot, Path.GetFileName(sourcePath))
             : destinationRoot;
@@ -357,7 +250,39 @@ public class FileService
             DeleteEmptyDirectory(Path.GetDirectoryName(sourcePath));
         }
     }
+    public void CopyItem(string sourcePath, string destinationRoot)
+    {
+        if (!File.Exists(sourcePath) && !Directory.Exists(sourcePath))
+        {
+            throw new FileNotFoundException("The source path does not exist.", sourcePath);
+        }
 
+        bool isDirectory = Directory.Exists(sourcePath);
+
+        string targetBasePath = isDirectory
+            ? Path.Combine(destinationRoot, Path.GetFileName(sourcePath))
+            : destinationRoot;
+
+        Directory.CreateDirectory(targetBasePath);
+
+        if (isDirectory)
+        {
+            foreach (string dirPath in Directory.GetDirectories(sourcePath, "*", SearchOption.AllDirectories))
+            {
+                string relativePath = Path.GetRelativePath(sourcePath, dirPath);
+                Directory.CreateDirectory(Path.Combine(targetBasePath, relativePath));
+            }
+
+            foreach (string filePath in Directory.GetFiles(sourcePath, "*.pdf", SearchOption.AllDirectories))
+            {
+                ProcessFile(filePath, sourcePath, targetBasePath);
+            }
+        }
+        else
+        {
+            ProcessFile(sourcePath, Path.GetDirectoryName(sourcePath), targetBasePath);
+        }
+    }
     private void DeleteEntireSourceStructure(string sourcePath)
     {
         try
@@ -475,23 +400,17 @@ public class FileService
         {
             if (isDirectory)
             {
-                // Handle directory deletion
                 ClearDirectoryAttributes(path);
                 Directory.Delete(path, true);
             }
             else
             {
-                // Handle file deletion
                 string jsonPath = Path.ChangeExtension(path, ".json");
-
-                // Delete JSON first
                 if (File.Exists(jsonPath))
                 {
                     ClearFileAttributes(jsonPath);
                     File.Delete(jsonPath);
                 }
-
-                // Delete PDF
                 ClearFileAttributes(path);
                 File.Delete(path);
             }
@@ -519,14 +438,12 @@ public class FileService
 
     private void ClearDirectoryAttributes(string dirPath)
     {
-        // Clear attributes from directory itself
         FileAttributes dirAttr = File.GetAttributes(dirPath);
         if ((dirAttr & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
         {
             File.SetAttributes(dirPath, dirAttr & ~FileAttributes.ReadOnly);
         }
 
-        // Clear attributes from all contained files
         foreach (string file in Directory.GetFiles(dirPath, "*", SearchOption.AllDirectories))
         {
             ClearFileAttributes(file);
@@ -544,12 +461,10 @@ public class FileService
 
         if (!isDirectory)
         {
-            // Handle file rename
             string jsonPath = Path.ChangeExtension(originalPath, ".json");
             string directory = Path.GetDirectoryName(originalPath);
             string newPath = Path.Combine(directory, newName);
 
-            // Ensure .pdf extension
             if (!newPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
                 newPath += ".pdf";
 
@@ -562,7 +477,6 @@ public class FileService
         }
         else
         {
-            // Handle directory rename
             string parentDir = Directory.GetParent(originalPath).FullName;
             string newPath = Path.Combine(parentDir, newName);
 
@@ -571,7 +485,6 @@ public class FileService
 
             Directory.Move(originalPath, newPath);
 
-            // Update all JSON files in the directory hierarchy
             UpdateJsonPathsInDirectory(newPath);
         }
     }
@@ -587,5 +500,4 @@ public class FileService
             }
         }
     }
-
 }
