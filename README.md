@@ -9,12 +9,7 @@ Tento repozitář obsahuje backendové API, které slouží jako serverová čá
 Frontendová desktopová aplikace, která s tímto API komunikuje, je dostupná zde:  
 🔗 https://github.com/VojtechGero/Bakalarka
 
-
-## Spuštění projektu
-
-Před spuštěním se ujistěte, že máte nainstalován .NET 8 SDK
-
-### Postup zprovoznění
+### Postup Spuštění
 
 1. **Získání přístupových údajů**
    - V Azure portálu si vytvořte (nebo použijte existující) službu Azure Document Intelligence.
